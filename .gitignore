@@ -13,3 +13,6 @@ songs/*
 
 # Virtual environments
 .venv
+
+# IDE files
+.idea/

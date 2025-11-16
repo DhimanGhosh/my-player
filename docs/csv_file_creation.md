@@ -2,7 +2,7 @@
 This documentation guides you how to create a **CSV** file for adding songs to your *library*.
 
 # Location of CSV file
-If you are manually creating your CSV file then save it under [library](my_player/data/library/) path.
+If you are manually creating your CSV file then save it under [library](/my_player/data/library/) path.
 
 You can also add new category / songs from the player using "➕ Add/Append Category" button.
 

@@ -77,3 +77,7 @@ YTDP_LIMIT_PER_QUERY    = 10      # number of search results per query
 RERANKER_EPOCHS         = 2
 RERANKER_BATCH_SIZE     = 16
 RERANKER_TEST_SPLIT     = 0.1     # train/validation split
+
+# AI Auto-train settings
+TRAINING_META_FILE = RERANKER_MODEL_DIR / "training_meta.json"
+MIN_NEW_SAMPLES_FOR_RETRAIN = 10  # train only if dataset grew by at least this many samples

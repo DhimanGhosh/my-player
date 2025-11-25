@@ -1,4 +1,5 @@
 import csv
+import json
 from typing import List, Tuple
 
 from sklearn.metrics import roc_auc_score
@@ -13,6 +14,8 @@ from my_player.helpers.constants import (
     RERANKER_EPOCHS,
     RERANKER_BATCH_SIZE,
     RERANKER_TEST_SPLIT,
+    TRAINING_META_FILE,
+    MIN_NEW_SAMPLES_FOR_RETRAIN
 )
 from my_player.models.training_sample import Sample
 
@@ -68,9 +71,62 @@ def _to_input_examples(
     ]
 
 
+def _load_last_trained_count() -> int | None:
+    if not TRAINING_META_FILE.exists():
+        return None
+
+    try:
+        with TRAINING_META_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        value = data.get("num_samples")
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _save_last_trained_count(count: int) -> None:
+    RERANKER_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    with TRAINING_META_FILE.open("w", encoding="utf-8") as f:
+        json.dump({"num_samples": count}, f, ensure_ascii=False, indent=2)
+
+
+def _should_train(current_count: int) -> bool:
+    last_count = _load_last_trained_count()
+
+    if last_count is None:
+        print(
+            f"[INFO] No previous training metadata found. "
+            f"Training from scratch with {current_count} samples."
+        )
+        return True
+
+    delta = current_count - last_count
+    if delta < MIN_NEW_SAMPLES_FOR_RETRAIN:
+        print(
+            f"[INFO] Dataset grew by only {delta} samples "
+            f"(last: {last_count}, current: {current_count})."
+        )
+        print(
+            f"[INFO] Skipping training. Waiting for at least "
+            f"{MIN_NEW_SAMPLES_FOR_RETRAIN} new samples."
+        )
+        return False
+
+    print(
+        f"[INFO] Dataset grew from {last_count} → {current_count} "
+        f"(+{delta}). Triggering retrain."
+    )
+    return True
+
+
 def train() -> None:
     print(f"[INFO] Loading dataset → {SONGLINK_TRAIN_DATASET}")
     samples = _load_dataset()
+    current_count = len(samples)
+
+    if not _should_train(current_count):
+        print("[INFO] Auto-train condition not met. Exiting.")
+        return
 
     # Stratify by binary label (>= 0.5 treated as positive)
     stratify_labels = [1 if s.label >= 0.5 else 0 for s in samples]
@@ -92,7 +148,7 @@ def train() -> None:
     print(f"[INFO] Loading model base: {RERANKER_MODEL}")
     model = CrossEncoder(RERANKER_MODEL, num_labels=1)
 
-    # Prepare DataLoader for the new CrossEncoder.fit API
+    # Prepare DataLoader for the CrossEncoder.fit() API
     train_examples = _to_input_examples(train_pairs, train_labels)
     train_dataloader = DataLoader(
         train_examples,
@@ -124,6 +180,8 @@ def train() -> None:
     print(f"[INFO] Saving finetuned model → {RERANKER_MODEL_DIR}")
     RERANKER_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     model.save(str(RERANKER_MODEL_DIR))
+
+    _save_last_trained_count(current_count)
 
     print("[INFO] Training complete")
 

@@ -5,16 +5,18 @@ import sys
 import time
 import re
 import os
+import json
 
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
-from my_player.helpers.constants import BAD_SEARCH_KEYWORDS, MIN_SEC, MAX_SEC
+from my_player.helpers.constants import BAD_SEARCH_KEYWORDS, MIN_SEC, MAX_SEC, YTDLP_DEFAULT_ARGS
 from my_player.models.song import Song
 from my_player.helpers.file_utils import expected_path
 from my_player.models.download import DownloadJob
+from my_player.ai.songlink_reranker import pick_best_candidate
 
 
 class DownloadManager(QObject):
@@ -112,6 +114,57 @@ class DownloadManager(QObject):
             finally:
                 q.task_done()
 
+    # ---------- helpers ----------
+    def _search_youtube_candidates(self, query: str, limit: int = 10) -> List[dict]:
+        """
+        Use yt-dlp in JSON mode to fetch top N YouTube search candidates
+        for the given query. Returns a list of dicts compatible with
+        ai.songlink_reranker.pick_best_candidate().
+        """
+        if not query:
+            return []
+
+        # yt-dlp JSON search: one JSON per line
+        cmd = [
+            sys.executable,
+            "-m", "yt_dlp",
+            "-j", f"ytsearch{limit}:{query}",
+            "--no-playlist" if YTDLP_DEFAULT_ARGS.get("no_playlist") else "",
+        ]
+
+        try:
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except Exception:
+            return []
+
+        if proc.returncode != 0:
+            return []
+
+        candidates: List[dict] = []
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                info = json.loads(line)
+            except Exception:
+                continue
+
+            url = info.get("webpage_url") or info.get("url")
+            title = info.get("title")
+            if not url or not title:
+                continue
+
+            candidates.append({
+                "url": url,
+                "title": title,
+                "description": info.get("description") or "",
+                "channel": info.get("channel") or "",
+                "duration": info.get("duration") or 0,
+            })
+
+        return candidates
+
     # ---------- yt-dlp wrapper ----------
     def _download_song_file(self, s: Song, out_path: str) -> Tuple[bool, str]:
         """
@@ -124,24 +177,42 @@ class DownloadManager(QObject):
         except Exception:
             pass
 
-        # Pick source (custom URL first)
+        # Pick source (custom URL first, then AI-ranked YouTube search)
         key_exact = "||".join(s.key())
-        key_wild  = "||".join(("*", s.title, s.album, ", ".join(s.artists)))
-        if hasattr(self, "_custom") and key_exact in self._custom:
+        key_wild = "||".join(("*", s.title, s.album, ", ".join(s.artists)))
+        if hasattr(self, "_custom") and key_exact in getattr(self, "_custom", {}):
             source = self._custom[key_exact]
-        elif hasattr(self, "_custom") and key_wild in self._custom:
+        elif hasattr(self, "_custom") and key_wild in getattr(self, "_custom", {}):
             source = self._custom[key_wild]
         else:
-            source = f"ytsearch1:{s.title} {', '.join(s.artists)} {s.album}".strip()
+            # Build a rich query with title, artists, album/film
+            parts = [s.title]
+            if s.artists:
+                parts.append(", ".join(s.artists))
+            if s.album:
+                parts.append(s.album)
+            query = " ".join(parts).strip()
+
+            # 1) Fetch top N YT candidates via yt-dlp (JSON mode)
+            candidates = self._search_youtube_candidates(query, limit=10)
+
+            # 2) Let AI reranker pick the best candidate
+            best = pick_best_candidate(query, candidates) if candidates else None
+
+            # 3) Fallback to vanilla ytsearch1 if AI or search fails
+            if best and best.get("url"):
+                source = best["url"]
+            else:
+                source = f"ytsearch1:{query}"
 
         Path(os.path.dirname(out_path)).mkdir(parents=True, exist_ok=True)
 
         rej = "|".join(re.escape(k) for k in (BAD_SEARCH_KEYWORDS or []))
         cmd = [
             sys.executable, "-m", "yt_dlp",
-            "--no-playlist",
-            "-f", "bestaudio/best",
-            "-x", "--audio-format", "mp3",
+            "--no-playlist" if YTDLP_DEFAULT_ARGS.get("no_playlist") else "",
+            "-f", YTDLP_DEFAULT_ARGS.get("format") or "bestaudio/best",
+            "-x", "--audio-format", YTDLP_DEFAULT_ARGS.get("audio_format") or "mp3",
             "-o", out_path,
             "--retry-sleep", "1",
             "--concurrent-fragments", "1",

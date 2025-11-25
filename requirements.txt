@@ -1,5 +1,8 @@
-PyQt6_sip>=13.10.2
-PyQt6>=6.10.0
-yt-dlp>=2025.11.12
-mutagen>=1.47.0
-rapidfuzz>=3.14.3
+PyQt6_sip==13.10.2
+PyQt6==6.10.0
+yt-dlp==2025.11.12
+mutagen==1.47.0
+rapidfuzz==3.14.3
+sentence-transformers==5.1.2
+transformers[torch]==4.57.3
+datasets==4.4.1

@@ -81,3 +81,4 @@ RERANKER_TEST_SPLIT     = 0.1     # train/validation split
 # AI Auto-train settings
 TRAINING_META_FILE = RERANKER_MODEL_DIR / "training_meta.json"
 MIN_NEW_SAMPLES_FOR_RETRAIN = 10  # train only if dataset grew by at least this many samples
+TRAINING_SEQUENCE_LENGTH = 445  # max tokens for CrossEncoder input sequences

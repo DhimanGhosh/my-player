@@ -15,7 +15,8 @@ from my_player.helpers.constants import (
     RERANKER_BATCH_SIZE,
     RERANKER_TEST_SPLIT,
     TRAINING_META_FILE,
-    MIN_NEW_SAMPLES_FOR_RETRAIN
+    MIN_NEW_SAMPLES_FOR_RETRAIN,
+    TRAINING_SEQUENCE_LENGTH
 )
 from my_player.models.training_sample import Sample
 
@@ -146,7 +147,12 @@ def train() -> None:
     print(f"[INFO] Validation samples: {len(val_samples)}")
 
     print(f"[INFO] Loading model base: {RERANKER_MODEL}")
-    model = CrossEncoder(RERANKER_MODEL, num_labels=1)
+    model = CrossEncoder(
+        RERANKER_MODEL,
+        num_labels=1,
+        max_length=TRAINING_SEQUENCE_LENGTH,   # reduce sequence length (default is usually 512)
+        device="cuda"     # force GPU explicitly
+    )
 
     # Prepare DataLoader for the CrossEncoder.fit() API
     train_examples = _to_input_examples(train_pairs, train_labels)
